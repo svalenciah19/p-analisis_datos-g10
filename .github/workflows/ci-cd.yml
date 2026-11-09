@@ -1,0 +1,70 @@
+name: CI/CD - Extraccion de datos
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # Botón "Run workflow" en la pestaña Actions
+  # schedule:
+  #   - cron: "0 12 * * *"  # Descomenta para ejecutarlo todos los días a las 7:00 a.m. (Colombia)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extraccion-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    name: CI - Pruebas automatizadas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Ejecutar pruebas
+        run: pytest -v
+
+  extraccion-y-despliegue:
+    name: CD - Extraer y publicar en Google Drive
+    needs: pruebas
+    # Solo despliega en push a main o ejecución manual (no en pull requests)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      # ubuntu-latest ya trae Google Chrome; Selenium Manager descarga el chromedriver compatible.
+      - name: Extraer datos y reemplazar resultado_extraccion.json en Drive
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: python -m src.main --drive
+
+      - name: Guardar JSON como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultado_extraccion
+          path: resultado_extraccion.json

@@ -426,3 +426,12 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Python / proyecto de extraccion
+__pycache__/
+.pytest_cache/
+.venv/
+resultado_extraccion.json
+client_secret*.json
+token*.json
+

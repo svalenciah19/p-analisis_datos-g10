@@ -1,0 +1,6 @@
+requests>=2.31
+beautifulsoup4>=4.12
+scrapy>=2.11
+selenium>=4.20
+google-api-python-client>=2.120
+google-auth>=2.28
