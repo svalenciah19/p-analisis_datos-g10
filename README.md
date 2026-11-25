@@ -63,6 +63,21 @@ python scripts/obtener_token_drive.py --keyvault kv-p-analisis-dev-44e9 --folder
 GitHub Actions inicia sesión con OIDC usando `AZURE_CLIENT_ID` (identidad `id-gh-...`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`, definidos en el `env` del workflow
 (son identificadores públicos; la credencial federada solo acepta tokens de este repositorio y del entorno `test`).
 
+Si el login falla con `AADSTS700213`, la credencial federada existente debe coincidir exactamente con el subject emitido por GitHub.
+El subject actual incluye los IDs inmutables del propietario y del repositorio. Un administrador de Azure debe actualizar la credencial
+una vez (con `az login` y permisos de escritura sobre la identidad) antes de volver a ejecutar el workflow:
+
+```bash
+az identity federated-credential update \
+  --subscription a7c9765d-ccb3-436d-aa12-9c84f0a93862 \
+  --resource-group rg-p-analisis-dev-44e9 \
+  --identity-name id-gh-p-analisis-dev-44e9 --name github-test \
+  --subject 'repo:svalenciah19@197932907/p-analisis_datos-g10@1445106353:environment:test'
+```
+
+La plantilla `infra/main.bicep` usa el mismo subject para futuros despliegues. Si cambia el repositorio o el entorno, actualiza sus
+parámetros para que coincidan con el subject mostrado en los logs de `azure/login`, y actualiza también la credencial en Azure.
+
 ### Configuración de Google Drive (una sola vez)
 
 1. En [Google Cloud Console](https://console.cloud.google.com/) crea un proyecto y habilita **Google Drive API**.
