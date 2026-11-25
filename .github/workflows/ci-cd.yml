@@ -12,6 +12,9 @@ permissions:
   contents: read
 
 env:
+  AZURE_CLIENT_ID: 12708768-ab2c-4328-9a8a-ad72937a1bd6        # identidad id-gh-p-analisis-dev-44e9
+  AZURE_TENANT_ID: 1dc9b339-fadb-432e-86df-423c38a0fcb8
+  AZURE_SUBSCRIPTION_ID: a7c9765d-ccb3-436d-aa12-9c84f0a93862
   AZURE_RESOURCE_GROUP: rg-p-analisis-dev-44e9
   AZURE_ACR_NAME: crpanalisisdev44e9
   AZURE_JOB_NAME: caj-p-analisis-dev-44e9
@@ -53,12 +56,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Identificadores públicos (no son secretos): OIDC solo acepta tokens de este repo y del entorno 'test'
       - name: Iniciar sesión en Azure (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Construir imagen en Azure Container Registry
         run: |

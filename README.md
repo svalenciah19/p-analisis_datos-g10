@@ -60,7 +60,8 @@ Credenciales de Google en Key Vault (una vez, requiere `az login`):
 python scripts/obtener_token_drive.py --keyvault kv-p-analisis-dev-44e9 --folder-id <ID_CARPETA_DRIVE>
 ```
 
-GitHub Actions necesita en el entorno `test` los secrets `AZURE_CLIENT_ID` (identidad `id-gh-...`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`.
+GitHub Actions inicia sesión con OIDC usando `AZURE_CLIENT_ID` (identidad `id-gh-...`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`, definidos en el `env` del workflow
+(son identificadores públicos; la credencial federada solo acepta tokens de este repositorio y del entorno `test`).
 
 ### Configuración de Google Drive (una sola vez)
 
@@ -230,7 +231,7 @@ sequenceDiagram
 ### Seguridad y gestión de secretos
 
 - Las credenciales de Google (OAuth 2.0) **nunca se versionan**. Se guardan en **Azure Key Vault** y el job las lee con su identidad administrada.
-- GitHub Actions usa **OIDC**; solo guarda los identificadores `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`.
+- GitHub Actions usa **OIDC**: no guarda contraseñas de Azure; los identificadores `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID` son públicos y están en el workflow.
 - El job accede a ACR, Key Vault y Blob Storage con **identidad administrada** y roles de mínimo privilegio (AcrPull, Key Vault Secrets User, Storage Blob Data Contributor).
 - El workflow tiene `permissions: contents: read` (más `id-token: write` solo en el job de despliegue).
 
