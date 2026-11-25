@@ -4,3 +4,5 @@ scrapy>=2.11
 selenium>=4.20
 google-api-python-client>=2.120
 google-auth>=2.28
+azure-identity>=1.17
+azure-storage-blob>=12.20

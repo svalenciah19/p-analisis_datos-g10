@@ -435,3 +435,6 @@ resultado_extraccion.json
 client_secret*.json
 token*.json
 
+
+# Azure AppOnboard sessions
+.copilot-azure/

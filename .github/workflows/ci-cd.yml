@@ -5,12 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:  # Botón "Run workflow" en la pestaña Actions
-  # schedule:
-  #   - cron: "0 12 * * *"  # Descomenta para ejecutarlo todos los días a las 7:00 a.m. (Colombia)
+  workflow_dispatch:  # Botón "Run workflow": despliega y lanza una extracción inmediata en Azure
+  # La ejecución diaria (7:00 a.m. Colombia) la programa el Container Apps Job en Azure.
 
 permissions:
   contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: rg-p-analisis-dev-44e9
+  AZURE_ACR_NAME: crpanalisisdev44e9
+  AZURE_JOB_NAME: caj-p-analisis-dev-44e9
+  IMAGE_NAME: extraccion
 
 concurrency:
   group: extraccion-${{ github.ref }}
@@ -35,36 +40,37 @@ jobs:
       - name: Ejecutar pruebas
         run: pytest -v
 
-  extraccion-y-despliegue:
-    name: CD - Extraer y publicar en Google Drive
+  despliegue-azure:
+    name: CD - Desplegar en Azure Container Apps
     needs: pruebas
     # Solo despliega en push a main o ejecución manual (no en pull requests)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: test
+    permissions:
+      contents: read
+      id-token: write  # Necesario para el login OIDC con Azure (sin contraseñas guardadas)
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Iniciar sesión en Azure (OIDC)
+        uses: azure/login@v2
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Instalar dependencias
-        run: pip install -r requirements.txt
+      - name: Construir imagen en Azure Container Registry
+        run: |
+          az acr build --registry "$AZURE_ACR_NAME" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE_NAME:${{ github.sha }}" --image "$IMAGE_NAME:latest" .
 
-      # ubuntu-latest ya trae Google Chrome; Selenium Manager descarga el chromedriver compatible.
-      - name: Extraer datos y reemplazar resultado_extraccion.json en Drive
-        env:
-          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
-          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
-          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-        run: python -m src.main --drive
+      - name: Actualizar el Container Apps Job con la nueva imagen
+        run: |
+          az containerapp job update --name "$AZURE_JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$AZURE_ACR_NAME.azurecr.io/$IMAGE_NAME:${{ github.sha }}"
 
-      - name: Guardar JSON como artefacto
-        uses: actions/upload-artifact@v4
-        with:
-          name: resultado_extraccion
-          path: resultado_extraccion.json
+      - name: Ejecutar la extracción ahora (solo con Run workflow)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          az containerapp job start --name "$AZURE_JOB_NAME" --resource-group "$AZURE_RESOURCE_GROUP"

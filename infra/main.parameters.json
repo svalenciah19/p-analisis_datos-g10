@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "p-analisis-dev-44e9" },
+    "location": { "value": "eastus2" },
+    "sessionId": { "value": "44e97c3c-962f-4e18-8ff6-eec22a5fe13d" },
+    "deployedBy": { "value": "Valencia Hernandez, Santiago" },
+    "createdAt": { "value": "2026-11-24T19:34:53.8734562-05:00" },
+    "deployerObjectId": { "value": "f8a6439b-2fdd-421f-b654-01d1fa02b984" }
+  }
+}

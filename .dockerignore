@@ -1,0 +1,16 @@
+.git
+.github
+.copilot-azure
+.venv
+__pycache__
+.pytest_cache
+infra
+tests
+scripts
+*.ipynb
+client_secret*.json
+token*.json
+resultado_extraccion.json
+README.md
+Dockerfile
+.dockerignore

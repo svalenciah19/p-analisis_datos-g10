@@ -8,10 +8,13 @@ Repositorio Remoto colaborativo para Evidencia de aprendizaje 2 . Optimizando la
 | `p-analisis_datos-g10.ipynb` | Notebook original (Google Colab) |
 | `src/extraccion.py` | Extracción con BeautifulSoup, Selenium y Scrapy |
 | `src/drive.py` | Borra `resultado_extraccion.json` en Google Drive y sube el nuevo |
-| `src/main.py` | Punto de entrada (`python -m src.main [--drive]`) |
+| `src/blob.py` | Guarda una copia histórica con fecha en Azure Blob Storage |
+| `src/main.py` | Punto de entrada (`python -m src.main [--drive] [--blob]`) |
 | `tests/` | Pruebas automatizadas (pytest, sin conexión a internet) |
-| `.github/workflows/ci-cd.yml` | Pipeline CI/CD de GitHub Actions |
-| `scripts/obtener_token_drive.py` | Script único para obtener el token de Google Drive |
+| `.github/workflows/ci-cd.yml` | Pipeline CI/CD de GitHub Actions (pruebas + despliegue en Azure) |
+| `Dockerfile` | Imagen del job: Python 3.12 + Google Chrome |
+| `infra/` | Infraestructura como código (Bicep) para Azure |
+| `scripts/obtener_token_drive.py` | Script único para obtener el token de Google Drive y guardarlo en Key Vault |
 
 ## Ejecución local
 
@@ -24,9 +27,40 @@ python -m src.main          # genera resultado_extraccion.json (requiere Google 
 ## CI/CD con GitHub Actions
 
 - **CI (`pruebas`)**: se ejecuta en cada push y pull request a `main`.
-- **CD (`extraccion-y-despliegue`)**: si las pruebas pasan (en push a `main` o ejecución manual), extrae los datos,
-  **elimina** `resultado_extraccion.json` de la carpeta de Drive y **sube uno nuevo**. El JSON también queda como artefacto del run.
+- **CD (`despliegue-azure`)**: si las pruebas pasan (en push a `main` o ejecución manual), inicia sesión en Azure con OIDC,
+  construye la imagen en Azure Container Registry y actualiza el **Container Apps Job**. Con **Run workflow** además lanza una extracción inmediata.
+- La extracción se ejecuta en Azure: **elimina** `resultado_extraccion.json` de la carpeta de Drive, **sube uno nuevo** y guarda una
+  **copia histórica** con fecha en Blob Storage. Se programa todos los días a las 7:00 a.m. (Colombia).
 - Ejecución manual: pestaña **Actions → CI/CD - Extraccion de datos → Run workflow**.
+
+## Despliegue en Azure
+
+| Recurso | Nombre | Función |
+|---------|--------|---------|
+| Resource Group | `rg-p-analisis-dev-44e9` | Agrupa todos los recursos (eastus2) |
+| Container Apps Job | `caj-p-analisis-dev-44e9` | Ejecuta `python -m src.main --drive --blob` (cron `0 12 * * *` UTC + manual) |
+| Container Apps Environment | `cae-p-analisis-dev-44e9` | Entorno serverless (plan Consumption) |
+| Container Registry | `crpanalisisdev44e9` | Imagen del job |
+| Storage Account | `stpanalisisdev44e9` | Contenedor `extracciones/AAAA/MM/DD/resultado_extraccion_<fecha>.json` |
+| Key Vault | `kv-p-analisis-dev-44e9` | Credenciales de Google Drive |
+| Log Analytics | `log-p-analisis-dev-44e9` | Logs de cada ejecución |
+| Managed Identities | `id-p-analisis-dev-44e9`, `id-gh-p-analisis-dev-44e9` | Identidad del job y de GitHub Actions (OIDC) |
+
+Comandos útiles:
+
+```bash
+az containerapp job start -n caj-p-analisis-dev-44e9 -g rg-p-analisis-dev-44e9            # ejecutar ahora
+az containerapp job execution list -n caj-p-analisis-dev-44e9 -g rg-p-analisis-dev-44e9 -o table
+az storage blob list --account-name stpanalisisdev44e9 -c extracciones --auth-mode login -o table
+```
+
+Credenciales de Google en Key Vault (una vez, requiere `az login`):
+
+```bash
+python scripts/obtener_token_drive.py --keyvault kv-p-analisis-dev-44e9 --folder-id <ID_CARPETA_DRIVE>
+```
+
+GitHub Actions necesita en el entorno `test` los secrets `AZURE_CLIENT_ID` (identidad `id-gh-...`), `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`.
 
 ### Configuración de Google Drive (una sola vez)
 
@@ -143,57 +177,64 @@ Las pruebas **no dependen de internet ni de credenciales**. Usan una copia del H
 | `test_ejecutar_sin_drive` | El flujo completo de `main` sin publicar en Drive |
 | `test_reemplazar_borra_anteriores_y_sube_nuevo` | Que se eliminen los JSON previos antes de subir el nuevo |
 | `test_reemplazar_sin_archivo_previo_solo_sube` | Que funcione aunque la carpeta esté vacía |
+| `test_nombre_historico_incluye_fecha_y_hora` | Nombre con fecha de la copia histórica en Blob Storage |
+| `test_subir_historico_sube_al_contenedor` | Que la copia se suba al contenedor `extracciones` |
 
 Si alguna prueba falla, **el pipeline se detiene** y no se publica información posiblemente corrupta.
 
 ### 5. Liberar y desplegar (Despliegue Continuo – CD)
 
-El job **`CD - Extraer y publicar en Google Drive`** depende de que el CI termine bien (`needs: pruebas`) y solo se ejecuta en
+El job **`CD - Desplegar en Azure Container Apps`** depende de que el CI termine bien (`needs: pruebas`) y solo se ejecuta en
 `push` a `main` o de forma manual (`workflow_dispatch`). **Nunca se ejecuta en Pull Requests**, así el código no revisado no puede desplegar.
 
 ```mermaid
 sequenceDiagram
     participant GH as GitHub Actions
+    participant ACR as Azure Container Registry
+    participant Job as Container Apps Job
     participant Web as books.toscrape.com
     participant API as Google Drive API
-    GH->>Web: GET página del producto (requests / Selenium)
-    Web-->>GH: HTML
-    GH->>GH: Extraer con BeautifulSoup, Selenium y Scrapy
-    GH->>GH: Generar resultado_extraccion.json
-    GH->>API: Buscar resultado_extraccion.json en la carpeta
-    API-->>GH: IDs de archivos existentes
-    GH->>API: DELETE archivos anteriores
-    GH->>API: UPLOAD nuevo resultado_extraccion.json
-    GH->>GH: Guardar JSON como artefacto del run
+    participant Blob as Azure Blob Storage
+    GH->>ACR: az acr build (imagen Python + Chrome)
+    GH->>Job: az containerapp job update --image
+    Note over Job: Cron diario 7:00 a.m. o Run workflow
+    Job->>Web: GET página del producto (requests / Selenium)
+    Web-->>Job: HTML
+    Job->>Job: Extraer con BeautifulSoup, Selenium y Scrapy
+    Job->>API: DELETE resultado_extraccion.json anterior
+    Job->>API: UPLOAD nuevo resultado_extraccion.json
+    Job->>Blob: Guardar copia histórica con fecha
 ```
 
-- Selenium usa el Google Chrome preinstalado en `ubuntu-latest` en modo *headless*.
-- El JSON se publica en Google Drive y además queda como **artefacto descargable** en cada ejecución.
-- `concurrency` evita que dos ejecuciones simultáneas modifiquen el archivo de Drive al mismo tiempo.
+- La imagen incluye Google Chrome para que Selenium funcione en modo *headless*.
+- GitHub inicia sesión en Azure con **OIDC** (credencial federada), sin contraseñas de Azure guardadas.
+- `concurrency` evita que dos despliegues simultáneos actualicen el job al mismo tiempo.
 
 ### 6. Operar
 
 | Disparador | Qué ejecuta |
 |------------|-------------|
-| `push` a `main` | CI + CD (extracción y publicación) |
+| `push` a `main` | CI + CD (nueva imagen desplegada en el job de Azure) |
 | `pull_request` a `main` | Solo CI (pruebas) |
-| Manual: **Actions → CI/CD - Extraccion de datos → Run workflow** | CI + CD bajo demanda |
-| `schedule` (opcional, comentado en el workflow) | CI + CD periódico, por ejemplo diario, para construir series de tiempo de precios |
+| Manual: **Actions → CI/CD - Extraccion de datos → Run workflow** | CI + CD + extracción inmediata en Azure |
+| Cron del Container Apps Job (`0 12 * * *` UTC) | Extracción diaria en Azure para construir series de tiempo de precios |
 
 ### 7. Monitorear
 
-- La pestaña **Actions** registra cada ejecución con su estado (✅/❌), duración y logs por paso.
-- Los logs muestran los datos extraídos por cada técnica y los IDs del archivo eliminado y del nuevo en Drive.
-- GitHub notifica por correo cuando un workflow falla. Por ejemplo, si el sitio cambia su HTML y las pruebas o la extracción dejan de funcionar.
+- La pestaña **Actions** registra cada despliegue con su estado (✅/❌), duración y logs por paso.
+- En Azure, cada ejecución del job queda en **Container Apps Job → Execution history** y sus logs en Log Analytics
+  (datos extraídos por cada técnica e IDs del archivo eliminado y del nuevo en Drive).
+- Blob Storage conserva el histórico de todos los JSON generados.
+- GitHub notifica por correo cuando un workflow falla.
 
 ### Seguridad y gestión de secretos
 
-- Las credenciales de Google (OAuth 2.0) **nunca se versionan**. Se guardan como *secrets* cifrados en el entorno `test` de GitHub:
-  `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN` y `GDRIVE_FOLDER_ID`.
-- El workflow tiene `permissions: contents: read` (privilegio mínimo).
-- El *refresh token* se genera una sola vez en local con `scripts/obtener_token_drive.py`.
+- Las credenciales de Google (OAuth 2.0) **nunca se versionan**. Se guardan en **Azure Key Vault** y el job las lee con su identidad administrada.
+- GitHub Actions usa **OIDC**; solo guarda los identificadores `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`.
+- El job accede a ACR, Key Vault y Blob Storage con **identidad administrada** y roles de mínimo privilegio (AcrPull, Key Vault Secrets User, Storage Blob Data Contributor).
+- El workflow tiene `permissions: contents: read` (más `id-token: write` solo en el job de despliegue).
 
-### Resultado de la primera ejecución automatizada
+### Resultado de la primera ejecución automatizada (GitHub Actions, antes de migrar a Azure)
 
 | Etapa | Estado | Duración aprox. |
 |-------|--------|-----------------|
