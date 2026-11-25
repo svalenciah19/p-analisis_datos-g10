@@ -21,7 +21,7 @@ param deployerObjectId string
 @description('Imagen del job. Vacío = imagen placeholder (fase 1)')
 param containerImage string = ''
 
-@description('Propietario y repositorio de GitHub con sus IDs inmutables, como aparecen en el subject OIDC')
+@description('Repositorio de GitHub autorizado por OIDC, en el formato del claim "sub" (owner@ownerId/repo@repoId)')
 param githubRepository string = 'svalenciah19@197932907/p-analisis_datos-g10@1445106353'
 
 @description('Entorno de GitHub Actions autorizado por OIDC')
